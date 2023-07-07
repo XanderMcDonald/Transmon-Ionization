@@ -68,8 +68,10 @@ class TR_Orig:
         
         #Projectors and excitation-number assisgment
         self.Projectors = self.N_projectors()
-        self.Exct_List, self.max_proj_list = self.Exct_label()
+        self.Exct_List, self.max_proj_list = self.exct_labeling()
         
+        #Eigenvector labeling
+        #self.eig_label =
 #############################################################################
 ########################## Transmon-only functions ##########################
 #############################################################################
@@ -150,21 +152,18 @@ class TR_Orig:
         Exct_list[0] = 0
         Exct_list[1] = 1
 
-        #Excitation number difference
-        E_Diff = [self.E_t[i+1] - self.E_t[i] for i in range(2*self.max_charge+1-1)]
-
-        exct_count = 1
+        exct_count = 2
 
         #Assigning excitation numbers to states within well
-        while E_Diff[exct_count] < E_Diff[exct_count-1]:
-            Exct_list[exct_count+1] = exct_count+1
+        while self.E_t[exct_count] < 2*self.EJ:
+            Exct_list[exct_count] = exct_count
             exct_count += 1
 
         #Remaining states must then by definition by outside well and come in pairs
         for j in range(0, (2*self.max_charge+1-exct_count-1)//2):
 
-            Exct_list[exct_count+1+2*j] = exct_count+1+j
-            Exct_list[exct_count+1+2*j+1] = exct_count+1+j
+            Exct_list[exct_count+2*j] = exct_count+j
+            Exct_list[exct_count+2*j+1] = exct_count+j
 
         return Exct_list
     
@@ -230,7 +229,7 @@ class TR_Orig:
         return Proj_list
 
     #Tries to assign a total excitation number to the eigenstates of the transmon + resonator Hamiltonian
-    def Exct_label(self):
+    def exct_labeling(self):
         max_exct = len(self.Projectors)
 
         assign_list = [0]*len(self.Eigvecs)
@@ -244,8 +243,28 @@ class TR_Orig:
 
         return assign_list, max_ovrlap_list
         
-
-    
+    #Assigns an index |i_t, n_r> to an eigenvector based on largest overlap
+    def eig_labeling(self):
+        bare_list = [[i ,n] for i in range(self.N_t) for n in range(self.N_r)] 
+        
+        label_list = [[],]*len(self.Eigvecs)
+        overlap_list  = [0]*len(self.Eigvecs)
+        
+        eig_index = 0
+        
+        while eig_index < len(self.Eigvecs):
+            bare_index = 0
+            
+            while bare_index < len(bare_list) and overlap_list[eig_index] < 0.5: #If the overlap with another state is larger than 0.5 then you've found the max due to completness property.
+                if np.abs(self.Eigvecs[eig_index].overlap(self.tr_state(bare_list[bare_index])))**2 > overlap_list[eig_index]:
+                    overlap_list[eig_index] = np.abs(self.Eigvecs[eig_index].overlap(self.tr_state(bare_list[bare_index])))**2
+                    label_list[eig_index] = bare_list[bare_index]
+                
+                bare_index += 1
+            
+            eig_index += 1
+        
+        return label_list, overlap_list
     
     
     
@@ -327,8 +346,10 @@ class TR_Disp:
         
         #Projectors and excitation-number assisgment
         self.Projectors = self.N_projectors()
-        self.Exct_List, self.max_proj_list = self.Exct_label()
+        self.Exct_List, self.max_proj_list = self.exct_labeling()
         
+        #Eigenvector labeling
+        #self.eig_label = 
 #############################################################################
 ########################## Transmon-only functions ##########################
 #############################################################################
@@ -410,21 +431,18 @@ class TR_Disp:
         Exct_list[0] = 0
         Exct_list[1] = 1
 
-        #Excitation number difference
-        E_Diff = [self.E_t[i+1] - self.E_t[i] for i in range(2*self.max_charge+1-1)]
-
-        exct_count = 1
+        exct_count = 2
 
         #Assigning excitation numbers to states within well
-        while E_Diff[exct_count] < E_Diff[exct_count-1]:
-            Exct_list[exct_count+1] = exct_count+1
+        while self.E_t[exct_count] < 2*self.EJ:
+            Exct_list[exct_count] = exct_count
             exct_count += 1
 
         #Remaining states must then by definition by outside well and come in pairs
         for j in range(0, (2*self.max_charge+1-exct_count-1)//2):
 
-            Exct_list[exct_count+1+2*j] = exct_count+1+j
-            Exct_list[exct_count+1+2*j+1] = exct_count+1+j
+            Exct_list[exct_count+2*j] = exct_count+j
+            Exct_list[exct_count+2*j+1] = exct_count+j
 
         return Exct_list
     
@@ -507,7 +525,7 @@ class TR_Disp:
         return Proj_list
 
     #Tries to assign a total excitation number to the eigenstates of the transmon + resonator Hamiltonian
-    def Exct_label(self):
+    def exct_labeling(self):
         max_exct = len(self.Projectors)
 
         assign_list = [0]*len(self.Eigvecs)
@@ -520,3 +538,27 @@ class TR_Disp:
                     max_ovrlap_list[eig_indx] = np.abs(self.Eigvecs[eig_indx].overlap(self.Projectors[proj_indx]*self.Eigvecs[eig_indx]))
 
         return assign_list, max_ovrlap_list
+    
+    #Assigns an index |i_t, n_r> to an eigenvector based on largest overlap
+    def eig_labeling(self):
+        bare_list = [[i ,n] for i in range(self.N_t) for n in range(self.N_r)] 
+        
+        label_list = [[],]*len(self.Eigvecs)
+        overlap_list  = [0]*len(self.Eigvecs)
+        
+        eig_index = 0
+        
+        while eig_index < len(self.Eigvecs):
+            bare_index = 0
+            
+            while bare_index < len(bare_list) and overlap_list[eig_index] < 0.5: #If the overlap with another state is larger than 0.5 then you've found the max due to completness property.
+                if np.abs(self.Eigvecs[eig_index].overlap(self.tr_state(bare_list[bare_index])))**2 > overlap_list[eig_index]:
+                    overlap_list[eig_index] = np.abs(self.Eigvecs[eig_index].overlap(self.tr_state(bare_list[bare_index])))**2
+                    label_list[eig_index] = bare_list[bare_index]
+                
+                bare_index += 1
+            
+            eig_index += 1
+        
+        return label_list, overlap_list
+    
