@@ -62,7 +62,7 @@ class TR_Orig:
     
         self.sin_t = np.conj(self.Eigvecs_t.T)@(1j*0.5*(np.diag(np.ones(2*self.max_charge), 1) - np.diag(np.ones(2*self.max_charge), -1)))@self.Eigvecs_t
         
-        #Getting eigenvalues and eigenvectors two different ways
+        #Eigenvalues and Eigenvectors of transmon + resonator Hamiltonian
         self.E, self.Eigvecs= self.H_tr().eigenstates()
         self.E -= self.E[0]
         
@@ -340,7 +340,7 @@ class TR_Disp:
     
         self.sin_t = np.conj(self.Eigvecs_t.T)@(1j*0.5*(np.diag(np.ones(2*self.max_charge), 1) - np.diag(np.ones(2*self.max_charge), -1)))@self.Eigvecs_t
         
-        #Getting eigenvalues and eigenvectors two different ways
+        #Eigenvalues and Eigenvectors of transmon + resonator Hamiltonian
         self.E, self.Eigvecs = self.H_tr().eigenstates()
         self.E -= self.E[0]
         
@@ -539,26 +539,4 @@ class TR_Disp:
 
         return assign_list, max_ovrlap_list
     
-    #Assigns an index |i_t, n_r> to an eigenvector based on largest overlap
-    def eig_labeling(self):
-        bare_list = [[i ,n] for i in range(self.N_t) for n in range(self.N_r)] 
-        
-        label_list = [[],]*len(self.Eigvecs)
-        overlap_list  = [0]*len(self.Eigvecs)
-        
-        eig_index = 0
-        
-        while eig_index < len(self.Eigvecs):
-            bare_index = 0
-            
-            while bare_index < len(bare_list) and overlap_list[eig_index] < 0.5: #If the overlap with another state is larger than 0.5 then you've found the max due to completness property.
-                if np.abs(self.Eigvecs[eig_index].overlap(self.tr_state(bare_list[bare_index])))**2 > overlap_list[eig_index]:
-                    overlap_list[eig_index] = np.abs(self.Eigvecs[eig_index].overlap(self.tr_state(bare_list[bare_index])))**2
-                    label_list[eig_index] = bare_list[bare_index]
-                
-                bare_index += 1
-            
-            eig_index += 1
-        
-        return label_list, overlap_list
     
