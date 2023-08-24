@@ -36,7 +36,7 @@ class TR():
         
         self.dim = self.N_t*self.N_r #Dimension of Hilbert space and in particular number of eigenvectors
         
-        #Parameters that can be zero or only relevant for dynamics, etc...
+        #Parameters that can be zero
         if self.params.get('n_g') == None:
             self.n_g = 0
         else:
@@ -52,7 +52,7 @@ class TR():
         self.n_t, self.cos_t, self.sin_t = qp.tensor(qp.Qobj(self.n_t[:self.N_t,:self.N_t]), qp.qeye(self.N_r)), qp.tensor(qp.Qobj(self.cos_t[:self.N_t,:self.N_t]), qp.qeye(self.N_r)), qp.tensor(qp.Qobj(self.sin_t[:self.N_t,:self.N_t]), qp.qeye(self.N_r))
         
         self.t_projectors = [qp.tensor(qp.basis(self.N_t, it)*qp.basis(self.N_t, it).dag(), qp.qeye(self.N_r)) for it in range(self.N_t)]
-        self.t_pop = sum([i_t*self.t_projectors[i_t] for i_t in range(self.N_t)])
+        self.N_t_operator = sum([i_t*P for i_t, P in enumerate(self.t_projectors)])
         
         #Resonator functions
         self.a = qp.tensor(qp.qeye(self.N_t), qp.destroy(self.N_r))
@@ -66,8 +66,7 @@ class TR():
         self.E_tr -= self.E_tr[0]
         
         #Dressed ground and excited state. Defined as state with largest overlap with bare ground and excited state
-        self.dressed_g0 = self.Eigvecs_tr[np.argmax([np.abs(state.overlap(self.tr_state([0,0])))**2 for state in self.Eigvecs_tr[:5]])]
-        self.dressed_e0 = self.Eigvecs_tr[np.argmax([np.abs(state.overlap(self.tr_state([1,0])))**2 for state in self.Eigvecs_tr[:5]])]
+        self.dressed_quantities()
         
 #############################################################################
 ########################## Transmon diagonalization #########################
@@ -80,7 +79,7 @@ class TR():
         cos_t = 1/2*(np.diag(np.ones(2*max_charge), -1) + np.diag(np.ones(2*max_charge), 1))
         sin_t = 1/(2*1j)*(np.diag(np.ones(2*max_charge), -1) - np.diag(np.ones(2*max_charge), 1))
         
-        Kinetic = 4*self.EC*(n_t-self.n_g)**2
+        Kinetic = 4*self.EC*(n_t-self.n_g*np.eye(2*max_charge+1))**2
         
         Potential = - self.EJ*(cos_t*np.cos(self.phi_0) + sin_t*np.sin(self.phi_0))
         
@@ -88,18 +87,6 @@ class TR():
         E -= E[0]
         
         return E, Eigvecs, np.conj(Eigvecs.T)@n_t@Eigvecs, np.conj(Eigvecs.T)@cos_t@Eigvecs, np.conj(Eigvecs.T)@sin_t@Eigvecs
-    
-    #Returns the transmon H_t = 4E_C (n_t-n_g)^2 - E_J cos(phi_t-phi_0 - phi) in the basis of transmon eigenstates where phi = 0
-    def transmon_shifted_potential(self, phi): 
-        E_t, Eigvecs_t, n_t, cos_t, sin_t = self.transmon_diag()
-        
-        n_t, cos_t, sin_t =  qp.Qobj(n_t), qp.Qobj(cos_t), qp.Qobj(sin_t)
-        
-        e_i_phi_t = cos_t+1j*sin_t
-        e_minus_i_phi_t = cos_t-1j*sin_t
-        
-        
-        return 4*self.EC*(n_t-self.n_g)**2-self.EJ/2*(e_i_phi_t*np.exp(-1j*(self.phi_0+phi)) + e_minus_i_phi_t*np.exp(1j*(self.phi_0+phi)))
     
 ###########################################################################
 ######################### Resonator + Hamiltonian #########################
@@ -132,31 +119,40 @@ class TR():
         return overlap_mat
             
     def t_overlaps(self, state):
-        return [state.overlap(P*state) for P in self.t_projectors]
+        return [np.abs(state.overlap(P*state)) for P in self.t_projectors]
     
     def r_overlaps(self, state):
-        return [state.overlap(P*state) for P in self.r_projectors]
+        return [np.abs(state.overlap(P*state)) for P in self.r_projectors]
     
+    def dressed_quantities(self):
+        dressed_g0_idx = np.argmax([np.abs(state.overlap(self.tr_state([0,0])))**2 for state in self.Eigvecs_tr])
+        self.dressed_g0 = self.Eigvecs_tr[dressed_g0_idx]
+        
+        dressed_e0_idx = np.argmax([np.abs(state.overlap(self.tr_state([1,0])))**2 for state in self.Eigvecs_tr])
+        self.dressed_e0 = self.Eigvecs_tr[dressed_e0_idx]
+        self.dressed_w_q = self.E_tr[dressed_e0_idx]
+        
+        dressed_g1_idx = np.argmax([np.abs(state.overlap(self.tr_state([0,1])))**2 for state in self.Eigvecs_tr])
+        dressed_e1_idx = np.argmax([np.abs(state.overlap(self.tr_state([1,1])))**2 for state in self.Eigvecs_tr])
+        
+        self.dressed_w_r = (self.E_tr[dressed_e1_idx]+self.E_tr[dressed_g1_idx] -self.dressed_w_q)/2
+        self.chi = (self.E_tr[dressed_e1_idx]-self.E_tr[dressed_g1_idx] -self.dressed_w_q)/2
+
+        self.dressed_alpha = self.E_tr[np.argmax([np.abs(state.overlap(self.tr_state([2,0])))**2 for state in self.Eigvecs_tr])] - 2*self.dressed_w_q
 
 ###########################################################################
 ############################# Branch analysis #############################
 ###########################################################################
     def branch_analysis(self, **maxes):
-        if maxes.get('max_t') == None:
-            max_t = self.N_t - 4
+        if maxes.get('max_t') == None or maxes.get('max_r') == None:
+            raise ValueError('Need to specify the max number of transmon and resonator states max_t,, max_r you want to do the branch analysis with')
+        elif type(maxes['max_t']) != int or type(maxes['max_r']) != int:
+            raise ValueError('max_t and max_r should be integers')
         else:
-            max_t = maxes['max_t']
-        
-        if maxes.get('max_r') == None:
-            max_r = self.N_r - 10
-        else:
-            max_r = maxes['max_r']
+            max_t, max_r = maxes['max_t'], maxes['max_r']
         
         #Builindg the matrices which we will use to determine the different branches
         branch_criteria_matrix = self.a_dag.transform(self.Eigvecs_tr).full()
-        
-        #First state in branch will have largest overlap with dressed ground, so we also need to build that matrix
-        first_state_matrix = self.a_dag.transform(self.Eigvecs_tr).full()
         
         for lambda_idx in range(self.dim):
             for n_idx in range(self.dim):
@@ -164,15 +160,15 @@ class TR():
                 
         
         #Initializing branches and branch index
-        self.branches_idx = [[] for l in range(max_t+1)]
-        self.E_branches = [[] for l in range(max_t+1)]
-        self.branches = [[] for l in range(max_t+1)]
+        self.branches_idx = [[] for l in range(max_t)]
+        self.E_branches = [[] for l in range(max_t)]
+        self.branches = [[] for l in range(max_t)]
         
-        for i_t in range(max_t+1):
+        for i_t in range(max_t):
             #First state in branch has largest overlap with bare |i_t, 0> 
             self.branches_idx[i_t].append(np.argmax([np.abs(state[i_t*self.N_r])**2 for state in self.Eigvecs_tr]))
             #Have to set the right row in the branch_criteria_matrix to zero to ensure that it is never picked again.
-            #branch_criteria_matrix[self.branches_idx[i_t][0]] = 0
+            branch_criteria_matrix[self.branches_idx[i_t][0]] = 0
             
             n_r = 0
             
@@ -180,18 +176,25 @@ class TR():
                 #Recursive definition of the branch
                 self.branches_idx[i_t].append(np.argmax(branch_criteria_matrix[:, self.branches_idx[i_t][n_r]]))
                 #Same idea, can't have two states selected be the same
-                #branch_criteria_matrix[self.branches_idx[i_t][n_r+1]] = 0
+                branch_criteria_matrix[self.branches_idx[i_t][n_r+1]] = 0
                 n_r += 1
             
             i_t += 1
         
         #Now with the branch_idx we can assign the eigenvectors and energies correctly.
-        for i_t in range(max_t+1):
-            for n in range(max_r+1):
-                self.E_branches[i_t].append(self.E_tr[self.branches_idx[i_t][n]]-n*self.w_r)
+        for i_t in range(max_t):
+            for n in range(max_r):
+                self.E_branches[i_t].append(self.E_tr[self.branches_idx[i_t][n]])
                 self.branches[i_t].append(self.Eigvecs_tr[self.branches_idx[i_t][n]])
         
-        pass
+        #Now compute <n_r> and <N_t>
+        self.branches_n_r_avg = [[] for l in range(max_t)]
+        self.branches_N_t_avg = [[] for l in range(max_t)]
+        
+        for i_t in range(max_t):
+            for state in self.branches[i_t]:
+                self.branches_n_r_avg[i_t].append(np.real(state.overlap(self.n_r*state)))
+                self.branches_N_t_avg[i_t].append(np.real(state.overlap(self.N_t_operator*state)))
 
 ##########################################################################################
 ############################# Time-dependent displaced frame #############################
@@ -207,14 +210,8 @@ class TR():
         return epsilon/(2*1j)*(counter-res)
     
     def n_t_drive(self,t, args): #Drive that the transmon sees after displacement
-        w_d = args['w_d']
-        epsilon = args['epsilon']
-        
-        counter = (np.exp(1j*w_d*t)-np.exp((-1j*self.w_r-self.kappa/2)*t))/(1j*(self.w_r+w_d)+self.kappa/2)
-        
-        res = (np.exp(-1j*w_d*t)-np.exp((-1j*self.w_r-self.kappa/2)*t))/(1j*(self.w_r-w_d)+self.kappa/2)
-        
-        return -1j*self.g*epsilon*(1/(2*1j)*(counter-res) - np.conj(1/(2*1j)*(counter-res)))
+
+        return 2*self.g*np.imag(self.alpha_r(t,args))
 
 ####################################################################
 ############################# Dynamics #############################
@@ -239,7 +236,7 @@ class TR():
         args = {'w_d' : w_d, 'epsilon' : epsilon}
         
         Measured_Ops = self.t_projectors
-        Measured_Ops += [self.n_t, self.t_pop]
+        Measured_Ops += [self.n_t, self.N_t_operator]
         
         Measured_Ops += self.r_projectors
         Measured_Ops += [self.a, self.n_r]
@@ -287,7 +284,7 @@ class TR():
         args = {'w_d' : w_d, 'epsilon' : epsilon}
         
         Measured_Ops = self.t_projectors
-        Measured_Ops += [self.n_t, self.t_pop]
+        Measured_Ops += [self.n_t, self.N_t_operator]
         
         Measured_Ops += self.r_projectors
         Measured_Ops += [self.a, self.n_r]
@@ -315,4 +312,21 @@ class TR():
         
         self.n_r_avg_lab_e[f"{w_d}"] = self.n_r_avg_e[f"{w_d}"] + np.conj(self.a_r_avg_e[f"{w_d}"])*self.alpha_r(t,args) + self.a_r_avg_e[f"{w_d}"]*np.conj(self.alpha_r(t, args)) + self.alpha_r(t,args)*np.conj(self.alpha_r(t ,args))
     
-    
+###################################################################
+############################# Floquet #############################
+###################################################################
+    #Does the Floquet analysis for the transmon only
+    def Floquet_Analysis_Transmon(self, w_d, epsilon, options = None):
+        #First define the slow amplitude multiplying the cos and sin envelope of the drive
+        detuning = w_d-self.w_r
+        t_eval = 1/(2*w_d) #The envolope is assumed to be constant during a single evolution of the period. We thus evaluate it at one specific point t_eval, here halfway through evolution
+        cos_env = epsilon*self.g/(detuning**2+(self.kappa/2)**2)*(
+                                                                  self.kappa/2*(1-np.cos(detuning*t_eval)*np.exp(-self.kappa/2*t_eval))
+                                                                 + detuning*np.sin(detuning*t_eval)*np.exp(-self.kappa/2*t_eval)
+                                                                 )
+        sin_env = epsilon*self.g/(detuning**2+(self.kappa/2)**2)*(
+                                                                  detuning*(1-np.cos(detuning*t_eval)*np.exp(-self.kappa/2*t_eval))
+                                                                 -self.kappa/2*np.sin(detuning*t_eval)*np.exp(-self.kappa/2*t_eval)
+                                                                 )
+        
+   
