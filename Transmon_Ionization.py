@@ -149,10 +149,10 @@ class TR():
         elif type(maxes['max_t']) != int or type(maxes['max_r']) != int:
             raise ValueError('max_t and max_r should be integers')
         else:
-            max_t, max_r = copy.deepcopy(maxes['max_t'], maxes['max_r'])
+            max_t, max_r = maxes['max_t'], maxes['max_r']
         
         #Builindg the matrices which we will use to determine the different branches
-        branch_criteria_matrix = self.a_dag.transform(self.Eigvecs_tr).full()
+        branch_criteria_matrix = copy.deepcopy(self.a_dag.transform(self.Eigvecs_tr).full())
         
         for lambda_idx in range(self.dim):
             for n_idx in range(self.dim):
@@ -220,7 +220,7 @@ class TR():
 ####################################################################
 ############################# Dynamics #############################
 ####################################################################
-    def time_evolve_g(self, t, drive_params, options = None):
+    def time_evolve_g(self, t, drive_params, options = None, progress_bar = False):
         #If this is the first time running this function, create a dictionary that will be used to store results for different w_d
         if hasattr(self, 'start_g'):
             pass
@@ -237,7 +237,7 @@ class TR():
             
             self.n_r_avg_lab_g = {}
         
-        self.g_times = copy.deepcopy(times)
+        self.g_times = copy.deepcopy(t)
         
         Measured_Ops = copy.deepcopy(self.t_projectors)
         Measured_Ops += copy.deepcopy([self.n_t, self.N_t])
@@ -254,7 +254,7 @@ class TR():
                                         t,
                                         np.sqrt(self.kappa)*self.a,
                                         Measured_Ops,
-                                        progress_bar = True,
+                                        progress_bar = progress_bar,
                                         options = options,
                                         args = drive_params)
         
@@ -270,7 +270,7 @@ class TR():
         
         self.n_r_avg_lab_g[key] = self.n_r_avg_g[key] +self.a_r_avg_g[key]*np.conj(self.alpha_r(t, drive_params))+np.conj(self.a_r_avg_g[key])*self.alpha_r(t, drive_params) + np.abs(self.alpha_r(t,drive_params))**2
         
-    def time_evolve_e(self, t,drive_params, options = None):
+    def time_evolve_e(self, t, drive_params, options = None, progress_bar = False):
         #If this is the first time running this function, create a dictionary that will be used to store results for different w_d
         if hasattr(self, 'start_e'):
             pass
@@ -304,7 +304,7 @@ class TR():
                                         t,
                                         np.sqrt(self.kappa)*self.a,
                                         Measured_Ops,
-                                        progress_bar = True,
+                                        progress_bar = progress_bar,
                                         options = options,
                                         args = drive_params)
         
@@ -320,80 +320,6 @@ class TR():
         
         self.n_r_avg_lab_e[key] = self.n_r_avg_e[key] +self.a_r_avg_e[key]*np.conj(self.alpha_r(t, drive_params))+np.conj(self.a_r_avg_e[key])*self.alpha_r(t, drive_params) + np.abs(self.alpha_r(t,drive_params))**2
     
-###################################################################
-############################# Floquet #############################
-###################################################################
-    def Quantum_Floquet_Analysis(self, drive_params, branches, times, options = None):
-        #Make sure that branches is a list of tuples
-        if type(branches) != list or not(all(type(branch) == tuple for branch in branches)):
-            raise ValueError("Branches must be a list of tuples of states you wish to track")
-        
-        #Make sure that the indices of the tuples are smaller than dim_t or dim_r 
-        if not(all(len(branch) == 2 for branch in branches)) or not(all(branch[0] < self.dim_t for branch in branches)) or not(all(branch[1] < self.dim_r for branch in branches)):
-            raise ValueError("Branches must have length two, and the arguments must be smaller than (dim_t, dim_r)")
-        
-        #If this is the first time running this function, create a dictionary that will be used to store results for different w_d
-        if hasattr(self, 'quantum_floquet_branches'):
-            pass
-        else:
-            self.quantum_floquet_branches = {}
-            self.quantum_floquet_quasi_energies = {}
-            self.quantum_floquet_a_r_avg = {}
-            self.quantum_floquet_t_pop_avg = {}
-            
-            self.floquet_times = {} #Times at which the drive is evaluated
-        
-        key = f"({drive_params['w_d']},{drive_params['epsilon']})"
-        
-        self.quantum_floquet_branches[key] = {}
-        self.quantum_floquet_quasi_energies[key] = {}
-        self.quantum_floquet_a_r_avg[key] = {}
-        self.quantum_floquet_t_pop_avg[key] = {}
-        
-        #Each of these dictionaries will have a dictionary for each branch
-        for branches in branches:
-            self.quantum_floquet_branches[key][f"{branch}"] = []
-            self.quantum_floquet_quasi_energies[key][f"{branch}"] = []
-            self.quantum_floquet_a_r_avg[key][f"{branch}"] = []
-            self.quantum_floquet_t_pop_avg[key][f"{branch}"] = []
-        
-        self.floquet_times[key] = times
-        
-        #We want to assign branches to the Floquet modes we generate. Our first branch is thus the bare branches in our list
-        for branch in branches:
-            self.quantum_floquet_branches[key][f"{branch}"].append(self.tr_state([branch[0], branch[1]]))
-        
-        #The envelope of the exp(-i w_d t) in this displaced frame
-        minus_amplitudes = copy.deepcopy(self.envelope_minus(self.floquet_times[f'{w_d}'], drive_params))
-        
-        #Period of drive. Remember we work in units where time is scaled by 2pi
-        T = copy.deepcopy(1/drive_params['w_d'])
-        
-        #We can then run over all amplitudes
-        for amp in minus_amplitudes:
-            H_total = [self.H_tr(), [self.n_t*amp, 'exp(-1j*w_d*t)'], [self.n_t*np.conj(amp), 'exp(1j*w_d*t)']]
-            
-            floquet_modes, quasi_energies = qp.floquet.floquet_modes(H_total, T, args = {'w_d' : w_d})
-        
-            for branch in branches:
-                overlap_vec = self.quantum_floquet_branches[key][f"{branch}"][-1].transform(floquet_modes) #overlpa_vec[j] = <floquet_modes[j]|previous_branch>
-                floquet_eig_idx = np.argmax([np.abs(overlap_vec)**2 for ovrlap in overlap_vec.full().flatten()]) #Might be able to do something faster, but finding the max is not the bottleneck here
-       
-            
-        for branch in branches:
-            overlap_vec = self.tr_state([branch[0], branch[1]]).transform(floquet_modes) #overlpa_vec[j] = <floquet_modes[j]|i_t, n_r> 
-            
-            
-            
-            self.quantum_floquet_branches[key][f"{branch}"] = []
-            self.quantum_floquet_branches[key][f"{branch}"].append(floquet_modes[floquet_eig_idx])
-            
-            self.quantum_floquet_quasi_energies[key][f"{branch}"] = []
-            self.quantum_floquet_quasi_energies[key][f"{branch}"].append(quasi_energies[floquet_eig_idx])
-            
-            self.quantum_floquet_a_r_avg = {}
-            
-            #while overlap_vec[floquet_idx]
-            
+
         
    
